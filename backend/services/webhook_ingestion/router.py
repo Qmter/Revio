@@ -135,3 +135,147 @@ async def handle_github_webhook(
         "review_id": str(review.id),
         "message": "AI Review task successfully pushed to queue",
     }
+
+# --- REST API ДЛЯ ФРОНТЕНДА ---
+api_router = APIRouter(prefix="/api", tags=["Dashboard API"])
+
+
+@api_router.get("/repositories")
+async def get_repositories(db: AsyncSession = Depends(get_async_session)):
+    """Список подключенных репозиториев"""
+    stmt = select(Repository).order_by(Repository.created_at.desc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@api_router.get("/reviews")
+async def get_reviews_history(db: AsyncSession = Depends(get_async_session)):
+    """Лента всех проведенных AI-ревью"""
+    stmt = (
+        select(Review, PullRequest, Repository)
+        .join(PullRequest, Review.pull_request_id == PullRequest.id)
+        .join(Repository, PullRequest.repository_id == Repository.id)
+        .order_by(Review.started_at.desc())
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    result = []
+    for review, pr, repo in rows:
+        result.append({
+            "id": review.id,
+            "repo_name": repo.full_name,
+            "pr_number": pr.github_pr_number,
+            "pr_title": pr.title,
+            "author": pr.author_handle,
+            "commit_sha": review.commit_sha[:7],
+            "status": review.status,
+            "score": review.score,
+            "summary": review.summary,
+            "started_at": review.started_at,
+            "completed_at": review.completed_at,
+        })
+    return result
+
+
+@api_router.get("/reviews/{review_id}")
+async def get_review_details(review_id: str, db: AsyncSession = Depends(get_async_session)):
+    """Детальная информация о конкретном ревью с точечными комментариями"""
+    stmt = select(Review).where(Review.id == review_id)
+    res = await db.execute(stmt)
+    review = res.scalar_one_or_none()
+
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # Для получения комментариев импортируем ReviewComment
+    from shared.models import ReviewComment
+    stmt_comments = select(ReviewComment).where(ReviewComment.review_id == review.id)
+    comments_res = await db.execute(stmt_comments)
+    comments = comments_res.scalars().all()
+
+    return {
+        "review": review,
+        "comments": comments
+    }
+
+# --- ДОПОЛНИТЕЛЬНЫЕ ЭНДПОИНТЫ УПРАВЛЕНИЯ ---
+
+@api_router.patch("/repositories/{repo_id}")
+async def update_repository_rules(
+    repo_id: str,
+    payload: Dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Обновление правил репозитория и статуса активности"""
+    stmt = select(Repository).where(Repository.id == repo_id)
+    res = await db.execute(stmt)
+    repo = res.scalar_one_or_none()
+
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    if "is_active" in payload:
+        repo.is_active = payload["is_active"]
+    if "custom_rules" in payload:
+        repo.custom_rules = payload["custom_rules"]
+
+    await db.commit()
+    await db.refresh(repo)
+    return repo
+
+
+@api_router.post("/test-review")
+async def trigger_test_review(
+    payload: Dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Запуск тестового AI-ревью прямо из UI"""
+    # Ищем первый активный репозиторий в БД
+    stmt = select(Repository).where(Repository.is_active == True)
+    res = await db.execute(stmt)
+    repo = res.scalars().first()
+
+    if not repo:
+        raise HTTPException(status_code=400, detail="Нет активных репозиториев в БД")
+
+    # Создаем тестовый PR
+    import uuid
+    from shared.models import PullRequest, Review
+    from shared.events import PRReviewRequestedEvent
+
+    pr = PullRequest(
+        repository_id=repo.id,
+        github_pr_number=payload.get("pr_number", 42),
+        title=payload.get("title", "Refactor authentication service and add async pool"),
+        author_handle=payload.get("author", "yaroslav_dev"),
+        head_sha="a1b2c3d4e5f678901234567890abcdef12345678",
+        base_branch="main",
+        state="open",
+    )
+    db.add(pr)
+    await db.flush()
+
+    review = Review(
+        pull_request_id=pr.id,
+        commit_sha=pr.head_sha,
+        status="pending",
+    )
+    db.add(review)
+    await db.commit()
+
+    event = PRReviewRequestedEvent(
+        review_id=review.id,
+        repository_id=repo.id,
+        github_repo_id=repo.github_repo_id,
+        pull_request_id=pr.id,
+        github_pr_number=pr.github_pr_number,
+        commit_sha=pr.head_sha,
+        author_handle=pr.author_handle,
+        base_branch=pr.base_branch,
+        custom_rules=repo.custom_rules or {},
+    )
+
+    await kafka_manager.send_event("pr-review-requests", event.model_dump())
+
+    return {"status": "queued", "review_id": str(review.id)}

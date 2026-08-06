@@ -5,11 +5,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
 
 class Settings(BaseSettings):
-    DB_HOST: str = "localhost"
+    DB_HOST: str = "postgres"
     DB_PORT: int = 5432
-    DB_NAME: str = "postgres"
+    DB_NAME: str = "review_db"
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "root"
+
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
 
     # Настройки LLM: "gemini", "ollama" или "mock"
     LLM_PROVIDER: str = "gemini"

@@ -5,9 +5,8 @@ from .config import settings
 
 
 async_engine = create_async_engine(
-    url=settings.DB_ASYNC_URL,
-    echo=True
-)
+    url=settings.DB_ASYNC_URL
+    )
 
 # Фабрика асинхронных сессий (привязанная к движку)
 async_session_maker = async_sessionmaker(
