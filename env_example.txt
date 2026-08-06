@@ -1,9 +1,14 @@
 DB_NAME=postgres
 DB_USER=postgres
 DB_PASSWORD=root
-DB_HOST=localhost
+DB_HOST=postgres
 DB_PORT=5432
 
+# Connecting to Kafka within Docker Compose
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+
+# Settings AI Engine
 LLM_PROVIDER=ollama
-GEMINI_API_KEY=<Ваш ключ>
-OLLAMA_MODEL=<Имя модели>
+OLLAMA_BASE_URL=http://1.1.1.1:11434
+OLLAMA_MODEL=<OLLAMA_MODEL>
+GEMINI_API_KEY=<GEMINI_API_KEY>

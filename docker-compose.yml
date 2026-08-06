@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # 1. База данных PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: review_postgres
+    environment:
+      POSTGRES_DB: review_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d review_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Apache Kafka & Zookeeper (Redpanda - легкая асинхронная альтернатива Kafka)
+  kafka:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.11
+    container_name: review_kafka
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://kafka:29092,OUTSIDE://localhost:9092
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+
+# 3. Webhook Ingestion Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: review_backend
+    ports:
+      - "8000:8000"
+    # Путь к файлу в корне проекта!
+    env_file:
+      - ./.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  # 4. AI Engine Worker
+  ai_engine:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: review_ai_engine
+    command: python -m services.ai_engine.main
+    # Путь к файлу в корне проекта!
+    env_file:
+      - ./.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  # 5. Frontend Dashboard (Nginx + React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: review_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
