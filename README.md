@@ -24,8 +24,8 @@ git_review/
 ├── backend/
 │   ├── services/
 │   │   ├── ai_engine/          # AI-воркер (интеграция с Ollama / Gemini)
-│   │   ├── webhook_ingestion/    # FastAPI эндпоинты и обработка вебхуков
-│   │   └── notifications/      # 🔔 Сервис уведомлений и алертов
+│   │   ├── webhook_ingestion/  # FastAPI эндпоинты и обработка вебхуков
+│   │   └── notifications/      # Сервис уведомлений и алертов
 │   ├── shared/                 # Общие модели БД, конфигурации, схемы
 │   ├── Dockerfile              # Сборка через pyproject.toml
 │   └── pyproject.toml          # Современный менеджер зависимостей (PEP 621)
